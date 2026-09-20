@@ -1,25 +1,29 @@
 // Minimal, zero-dependency PDF text extractor for text-based PDFs.
-// Reads FlateDecode (zlib) content streams and pulls text from Tj / TJ operators.
-// Scanned/image-only PDFs have no embedded text, so they return little/nothing.
 import zlib from 'node:zlib';
 
 function decodePdfString(s) {
-  return s
-    .split('\
-').join('
-')
-    .split('\\r').join('\r')
-    .split('\\t').join('\t')
-    .split('\\(').join('(')
-    .split('\\)').join(')')
-    .split('\\\\').join('\\')
-    .replace(/\\([0-7]{1,3})/g, function (m, o) { return String.fromCharCode(parseInt(o, 8)); });
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    if (s[i] === '\\' && i + 1 < s.length) {
+      var nx = s[i + 1];
+      if (nx === 'n') { out += ' '; i++; }
+      else if (nx === 'r') { out += ' '; i++; }
+      else if (nx === 't') { out += ' '; i++; }
+      else if (nx === '(') { out += '('; i++; }
+      else if (nx === ')') { out += ')'; i++; }
+      else if (nx === '\\') { out += '\\'; i++; }
+      else { out += nx; i++; }
+    } else {
+      out += s[i];
+    }
+  }
+  return out;
 }
 
 function extractStrings(content) {
   var out = '';
   var reString = /\((?:\\.|[^\\()])*\)/g;
-  var parts = content.split(/(Tj|TJ|Td|TD|T\*|Tm)/);
+  var parts = content.split(/(Tj|TJ|Td|TD|Tm)/);
   for (var i = 0; i < parts.length; i++) {
     var tok = parts[i];
     var found = tok.match(reString);
@@ -28,9 +32,8 @@ function extractStrings(content) {
         out += decodePdfString(found[j].slice(1, -1));
       }
     }
-    if (tok === 'Td' || tok === 'TD' || tok === 'T*') out += '
-';
-    if (tok === 'Tj' || tok === 'TJ') out += ' ';
+    if (tok === 'Td' || tok === 'TD') { out += ' '; }
+    if (tok === 'Tj' || tok === 'TJ') { out += ' '; }
   }
   return out;
 }
@@ -42,14 +45,13 @@ export function extractPdfText(buffer) {
   while (true) {
     var sIdx = buf.indexOf('stream', idx);
     if (sIdx === -1) break;
-    var dataStart = sIdx + 6; // length of 'stream'
-    if (buf[dataStart] === 0x0d) dataStart++;
-    if (buf[dataStart] === 0x0a) dataStart++;
+    var dataStart = sIdx + 6;
+    if (buf[dataStart] === 13) dataStart++;
+    if (buf[dataStart] === 10) dataStart++;
     var eIdx = buf.indexOf('endstream', dataStart);
     if (eIdx === -1) break;
     var chunk = buf.slice(dataStart, eIdx);
-    idx = eIdx + 9; // length of 'endstream'
-
+    idx = eIdx + 9;
     var content = null;
     try {
       content = zlib.inflateSync(chunk).toString('latin1');
@@ -61,13 +63,9 @@ export function extractPdfText(buffer) {
       }
     }
     if (content && (content.indexOf('Tj') !== -1 || content.indexOf('TJ') !== -1)) {
-      text += extractStrings(content) + '
-';
+      text += extractStrings(content) + ' ';
     }
   }
-  text = text.replace(/[ \t]+/g, ' ').replace(/
-{3,}/g, '
-
-').trim();
-  return text;
+  text = text.replace(/[ \t]+/g, ' ');
+  return text.trim();
 }
